@@ -1,6 +1,6 @@
 # 博客搭建 Day-1 TODO（Docker 版，E2E 到 GitHub）
 
-更新时间：2026-03-24
+更新时间：2026-03-26
 
 目标：1 天内完成个人博客上线（先 1 篇样例文章），并由 Codex 完成代码提交与推送。
 
@@ -106,7 +106,7 @@
 - [ ] D1 生产构建验证
   - 命令：
     ```bash
-    sudo docker run --rm -v "$PWD":/src -w /src ghcr.io/gohugoio/hugo:latest hugo --minify
+    sudo docker run --rm -v "$PWD":/src -w /src ghcr.io/gohugoio/hugo:latest --minify
     ```
   - 验收：返回码为 0，生成 `public/`。
 
@@ -121,38 +121,136 @@
 
 ---
 
-## E. 自动部署与 E2E 提交
+## E. 自动部署与 E2E 提交（详细版）
+
+- [ ] E0 预检查（必须先过）
+  - 命令：
+    ```bash
+    cd /mnt/d/git/practice_blog
+    git rev-parse --is-inside-work-tree
+    git branch --show-current
+    gh auth status
+    git remote -v
+    ```
+  - 验收：
+    - 在 Git 仓库内
+    - 当前分支为 `main`
+    - `gh` 已登录
+    - `origin` 指向 `git@github.com:<username>/<username>.github.io.git`
 
 - [ ] E1 新建 GitHub Actions 文件 `.github/workflows/hugo.yml`
-  - 要求：
-    - `push` 触发 `main`
-    - checkout 含 submodules
-    - 构建 + upload artifact + deploy pages
-  - 验收：YAML 校验通过。
+  - 命令：
+    ```bash
+    mkdir -p .github/workflows
+    cat > .github/workflows/hugo.yml <<'EOF'
+    name: Deploy Hugo site to Pages
 
-- [ ] E2 提交代码
+    on:
+      push:
+        branches: ["main"]
+      workflow_dispatch:
+
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+
+    jobs:
+      build:
+        runs-on: ubuntu-latest
+        steps:
+          - name: Checkout
+            uses: actions/checkout@v4
+            with:
+              submodules: recursive
+              fetch-depth: 0
+
+          - name: Setup Pages
+            uses: actions/configure-pages@v5
+
+          - name: Setup Hugo
+            uses: peaceiris/actions-hugo@v3
+            with:
+              hugo-version: latest
+              extended: true
+
+          - name: Build
+            run: hugo --minify
+
+          - name: Upload artifact
+            uses: actions/upload-pages-artifact@v3
+            with:
+              path: ./public
+
+      deploy:
+        needs: build
+        runs-on: ubuntu-latest
+        environment:
+          name: github-pages
+          url: ${{ steps.deployment.outputs.page_url }}
+        steps:
+          - name: Deploy to GitHub Pages
+            id: deployment
+            uses: actions/deploy-pages@v4
+    EOF
+    ```
+  - 验收：文件存在且 YAML 无语法错误。
+
+- [ ] E2 本地构建自检（建议）
+  - 命令：
+    ```bash
+    sudo docker run --rm -v "$PWD":/src -w /src ghcr.io/gohugoio/hugo:latest --minify
+    ```
+  - 验收：命令成功并生成 `public/`。
+
+- [ ] E3 提交前检查
+  - 命令：
+    ```bash
+    git status --short
+    ```
+  - 验收：至少包含 `hugo.toml`、`content/`、`.github/workflows/hugo.yml`、`.gitmodules`、`themes/PaperMod`。
+
+- [ ] E4 提交代码
   - 命令：
     ```bash
     git add .
-    git commit -m "init: hugo blog with docker workflow"
+    git commit -m "init: hugo pages site with actions deploy"
     ```
-  - 验收：`git log -1 --oneline` 可见提交。
+  - 验收：`git log -1 --oneline` 可见提交记录。
 
-- [ ] E3 推送到 GitHub（Codex 执行）
+- [ ] E5 推送到 GitHub（Codex 执行）
   - 命令：
     ```bash
     git push -u origin main
     ```
-  - 验收：远端分支创建成功。
+  - 验收：远端 `main` 分支创建/更新成功。
 
-- [ ] E4 仓库开启 Pages（GitHub Actions 作为构建源）
-  - 路径：`Settings -> Pages -> Build and deployment -> GitHub Actions`
-  - 验收：Actions 工作流跑绿。
+- [ ] E6 若 Pages 模式未自动启用，强制设为 workflow
+  - 命令：
+    ```bash
+    gh api repos/<username>/<username>.github.io/pages || true
+    gh api -X POST repos/<username>/<username>.github.io/pages -f build_type=workflow || \
+    gh api -X PUT repos/<username>/<username>.github.io/pages -f build_type=workflow
+    ```
+  - 验收：Pages API 可返回配置，`build_type` 为 `workflow`。
 
-- [ ] E5 线上验收
+- [ ] E7 观察 CI/CD 运行状态
+  - 命令：
+    ```bash
+    gh run list --limit 5
+    gh run watch
+    ```
+  - 验收：`build` 和 `deploy` Job 均为绿色成功。
+
+- [ ] E8 线上验收
   - 验收：
     - 首页可访问：`https://<username>.github.io/`
     - 文章页可访问：`https://<username>.github.io/posts/hello-blog/`
+    - `Settings -> Pages` 显示站点已发布状态
 
 ---
 
@@ -163,4 +261,3 @@
 - [ ] DoD3：`/posts/<slug>/` 永久链接生效。
 - [ ] DoD4：Front Matter 字段规范已落地。
 - [ ] DoD5：Codex 已完成一次 E2E 提交与推送记录。
-
